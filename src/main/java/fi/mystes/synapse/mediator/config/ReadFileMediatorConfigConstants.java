@@ -26,6 +26,7 @@ public class ReadFileMediatorConfigConstants {
     public static final QName ROOT_TAG = new QName(NAMESPACE_STRING, ROOT_TAG_NAME);
     public static final QName ATT_PROPERTY = new QName("property");
     public static final QName ATT_FILENAME = new QName("fileName");
+    public static final QName ATT_CONTENT_TYPE = new QName("contentType");
 
     public static final QName ATT_ATTACH_XPATH = new QName("attachXpath");
 

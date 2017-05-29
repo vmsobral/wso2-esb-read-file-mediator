@@ -17,22 +17,38 @@ package fi.mystes.synapse.mediator;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringWriter;
+import java.net.URI;
+import java.net.URISyntaxException;
 
+import javax.xml.namespace.QName;
+
+import org.apache.axiom.om.OMAbstractFactory;
 import org.apache.axiom.om.OMElement;
 import org.apache.axiom.om.impl.builder.StAXOMBuilder;
 import org.apache.axiom.soap.SOAPBody;
+import org.apache.commons.io.IOUtils;
 import org.apache.synapse.MessageContext;
 import org.apache.synapse.SynapseLog;
 import org.apache.synapse.mediators.AbstractMediator;
 import org.apache.synapse.util.xpath.SynapseXPath;
 import org.jaxen.JaxenException;
 
+import com.jcraft.jsch.Channel;
+import com.jcraft.jsch.ChannelSftp;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.Session;
+import com.jcraft.jsch.SftpException;
+
 /**
  * Custom mediator to read XML file content into the current payload either
  * directly to SOAP body element or to defined target element.
  * 
- * <readFile (fileName="path" | property="propertyName")
+ * <readFile (fileName="path" | property="propertyName") contentType="text/plain|xml"
  * [attachXpath="expression"]/>
  */
 public class ReadFileMediator extends AbstractMediator {
@@ -40,6 +56,8 @@ public class ReadFileMediator extends AbstractMediator {
     private String fileName;
 
     private String property;
+    
+    private String contentType;
     
     private SynapseXPath attachXpath = null;
 
@@ -61,33 +79,54 @@ public class ReadFileMediator extends AbstractMediator {
         }
 
         SOAPBody body = context.getEnvelope().getBody();
-        File xmlFileToProcess = initProcessableFile(context);
-
-
-        if (xmlFileToProcess.exists()) {
+        
+        try {
+        
+        	InputStream inputStream = initProcessableFile(context);
+			
+			if (contentType != null) {
+				
+				OMElement fileElement = null;
+				try {
+					if (contentType.equalsIgnoreCase("text/plain")) {
+						fileElement = OMAbstractFactory.getOMFactory().createOMElement(
+			            		new QName("http://ws.apache.org/commons/ns/payload", "text"));
+						
+						StringWriter writer = new StringWriter();
+				        IOUtils.copy(inputStream, writer, "UTF-8");
+				        String content = writer.toString();
+		            	context.getEnvelope().getBody().getFirstElement().detach();
+		            	fileElement.setText(content);
+			                
+					} else if (contentType.equalsIgnoreCase("xml")) {
+	                    fileElement = new StAXOMBuilder(inputStream).getDocumentElement();
+					}
+					
+				} catch (Exception e) {
+	                synLog.error("Error while parsing file : " + fileName);
+	                context.setProperty("READ_FILE_RESPONSE", 
+	                		"Error while parsing file : " + fileName);
+	            }
+				appendFileContentIntoGivenElement(context, body, fileElement);
+            
+			} else {
+				if (synLog.isTraceOrDebugEnabled()) {
+					synLog.traceOrDebug("Content Type of file " + fileName + "unknown or not declared.");
+				}
+				context.setProperty("READ_FILE_RESPONSE", "Content Type of file " + fileName + 
+						" unknown or not declared.");
+	        }
+        } catch (Exception e) {
 			if (synLog.isTraceOrDebugEnabled()) {
-				synLog.traceOrDebug("File " + xmlFileToProcess.getName() + " exists, processing.");
+				synLog.traceOrDebug("Error trying to read file " + fileName + ". " + e.getMessage());
 			}
-            OMElement fileElement;
-            try {
-                InputStream xmlInputStream = new FileInputStream(xmlFileToProcess);
-                fileElement = new StAXOMBuilder(xmlInputStream).getDocumentElement();
-            } catch (Exception e) {
-                synLog.error("Error while parsing XML file : " + xmlFileToProcess.getAbsolutePath());
-                return false;
-            }
-
-            appendFileContentIntoGivenElement(context, body, fileElement);
-        } else {
-			if (synLog.isTraceOrDebugEnabled()) {
-				synLog.traceOrDebug("File " + xmlFileToProcess.getName() + " doesn't exist.");
-			}
-            return false;
+			context.setProperty("READ_FILE_RESPONSE", "Error trying to read file " + fileName + ". " + e.getMessage());
         }
         
         if (synLog.isTraceOrDebugEnabled()) {
         	synLog.traceOrDebug("Ending ReadFileMediator");
         }
+        context.setProperty("READ_FILE_RESPONSE", "OK");
         return true;
     }
 
@@ -135,15 +174,46 @@ public class ReadFileMediator extends AbstractMediator {
 	 * @param context Contains property which may hold XML file name.
 	 * 
 	 * @return Reference to file object
+	 * @throws URISyntaxException 
+	 * @throws SftpException 
+	 * @throws JSchException 
+	 * @throws FileNotFoundException 
+	 * @throws IOException 
 	 */
-	private File initProcessableFile(MessageContext context) {
-		File xmlFileToProcess = null;
+	private InputStream initProcessableFile(MessageContext context) 
+			throws URISyntaxException, JSchException, SftpException, FileNotFoundException {
+		InputStream fileToProcess = null;
         if (fileName != null) {
-            xmlFileToProcess = new File(fileName);
+        	URI aURI = new URI(fileName);
+        	
+        	if (aURI.getScheme().equals("file"))
+        		fileToProcess = new FileInputStream(new File(aURI));
+        	
+        	else if (aURI.getScheme().equals("ftp") || aURI.getScheme().equals("sftp"))
+        		fileToProcess = processFtpSftpInput(aURI);
+        	
+        	else
+        		throw new URISyntaxException(fileName, "Unknown protocol");
+
         } else if (property != null) {
-            xmlFileToProcess = new File((String) context.getProperty(property));
+        	fileToProcess = new FileInputStream(new File((String) context.getProperty(property)));
         }
-		return xmlFileToProcess;
+		return fileToProcess;
+	}
+	
+	private InputStream processFtpSftpInput(URI aURI) throws JSchException, SftpException {
+		JSch jsch = new JSch();
+		Session session = jsch.getSession(aURI.getUserInfo().substring(0, aURI.getUserInfo().indexOf(":")), 
+				aURI.getHost(), aURI.getPort());
+		session.setConfig("StrictHostKeyChecking", "no");
+		session.setPassword(aURI.getUserInfo().substring(aURI.getUserInfo().indexOf(":")+1));
+		session.connect();
+
+		Channel channel = session.openChannel("sftp");
+		channel.connect();
+		ChannelSftp sftpChannel = (ChannelSftp) channel;
+		
+        return sftpChannel.get(aURI.getPath());
 	}
     
     /**
@@ -174,7 +244,7 @@ public class ReadFileMediator extends AbstractMediator {
     }
 
     /**
-     * Setter for property which contains XML file to be processed.
+     * Setter for property which contains file to be processed.
      * 
      * @param property
      */
@@ -183,7 +253,7 @@ public class ReadFileMediator extends AbstractMediator {
     }
 
     /**
-     * Getter for XML file name.
+     * Getter for file's name.
      * 
      * @return
      */
@@ -192,12 +262,30 @@ public class ReadFileMediator extends AbstractMediator {
     }
 
     /**
-     * Setter for XML file name.
+     * Setter for file's name.
      * 
      * @param fileName
      */
     public void setFileName(String fileName) {
         this.fileName = fileName;
     }
+
+    /**
+     * Getter for file's content type.
+     * 
+     * @return
+     */
+	public String getContentType() {
+		return contentType;
+	}
+
+	/**
+     * Setter for file's content type.
+     * 
+     * @param contentType
+     */
+	public void setContentType(String contentType) {
+		this.contentType = contentType;
+	}
 
 }

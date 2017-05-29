@@ -71,10 +71,18 @@ public class ReadFileMediatorFactory extends AbstractMediatorFactory {
             String value = propertyElement.getAttributeValue();
             mediator.setProperty(value);
         }
+        OMAttribute contentTypeElement = elem.getAttribute(ReadFileMediatorConfigConstants.ATT_CONTENT_TYPE);
+        if (contentTypeElement != null) {
+            String value = contentTypeElement.getAttributeValue();
+            mediator.setContentType(value);
+        }
         
 		if (fileNameElement == null && propertyElement == null) {
 			handleException("Either fileName or property attribute must be declared");
         }
+		if (mediator.getContentType() == null) {
+			handleException("File's content type must be declared");
+		}
 
         OMAttribute expression = elem.getAttribute(ReadFileMediatorConfigConstants.ATT_ATTACH_XPATH);
         if (expression != null) {

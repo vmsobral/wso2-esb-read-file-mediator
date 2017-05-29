@@ -41,6 +41,9 @@ public class ReadFileMediatorSerializer extends AbstractMediatorSerializer {
 		if (mediator.getFileName() == null && mediator.getProperty() == null) {
 			handleException("Either fileName or property must be declared");
 		}
+		if (mediator.getContentType() == null) {
+			handleException("File's content type must be declared");
+		}
 
 		if (mediator.getFileName() != null) {
         	element.addAttribute("fileName", mediator.getFileName(),
@@ -48,6 +51,10 @@ public class ReadFileMediatorSerializer extends AbstractMediatorSerializer {
         }
 		if (mediator.getProperty() != null) {
 			element.addAttribute("property", mediator.getProperty(),
+                nullNS);
+		}
+		if (mediator.getContentType() != null) {
+			element.addAttribute("contentType", mediator.getContentType(),
                 nullNS);
 		}
 

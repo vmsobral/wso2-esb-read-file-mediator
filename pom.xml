@@ -170,6 +170,16 @@
             <artifactId>mockito-core</artifactId>
             <version>1.10.19</version>
         </dependency>
+	<dependency>
+	    <groupId>commons-net</groupId>
+	    <artifactId>commons-net</artifactId>
+	    <version>3.3</version>
+	</dependency>
+	<dependency>
+		<groupId>com.jcraft</groupId>
+		<artifactId>jsch</artifactId>
+		<version>0.1.54</version>
+	</dependency>
     </dependencies>
     <properties>
         <CApp.type>lib/synapse/mediator</CApp.type>
